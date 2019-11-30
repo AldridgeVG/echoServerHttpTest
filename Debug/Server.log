@@ -1,0 +1,4 @@
+﻿  server.cpp
+c:\users\caxus\desktop\c++\echoservertestconsole\server\server.cpp(82): warning C4172: 返回局部变量或临时变量的地址: tmp
+c:\users\caxus\desktop\c++\echoservertestconsole\server\server.cpp(71): warning C4172: 返回局部变量或临时变量的地址: path
+  Server.vcxproj -> C:\Users\caxus\Desktop\C++\echoServerTestConsole\Debug\Server.exe
