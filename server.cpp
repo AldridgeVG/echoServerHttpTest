@@ -4,11 +4,11 @@
 #include <sys/stat.h>
 #include <Windows.h>
 #include <iostream>
-#include <fstream>
 #include <io.h>
 #include <process.h>
 #include <direct.h>
-
+#include <thread>
+#include <conio.h>
 using namespace std;
 
 //enable classic C function
@@ -23,12 +23,13 @@ using namespace std;
 
 sockaddr_in cAddr = { 0 };
 int len = sizeof cAddr;
-SOCKET clientSocket[1024];
+SOCKET clientSocket;
 
 int scount = 0;
+int echoFlag = 1;
 
 char fileBuff[1024];
-
+char filePath[200];
 
 //check if contains certain sub str
 int containsSubstr(char* str1, const char* str2) {
@@ -90,7 +91,8 @@ void readHtml(char*filename) {
 	//printf("%s\r\n", buff);
 }
 //comm to clients
-void commBrowser(int index) {
+void commBrowser(SOCKET clientsocket) {
+	scount++;
 	char *method = { NULL };				//client request method
 	char *url = { NULL };						//client request url
 	char *version = { NULL };				//request protocol version
@@ -104,10 +106,10 @@ void commBrowser(int index) {
 
 	int r;
 	while (1) {
-		r = recv(clientSocket[index], buff, 1023, NULL);
+		r = recv(clientSocket, buff, 1023, NULL);
 		if (r > 0) {
 			buff[r] = 0;
-			printf("client %d dgram:\n%s\n", index, buff);
+			printf("client %d dgram:\n%s\n", scount, buff);
 
 			//analyze datagram to get requested html
 			char *p = buff;
@@ -153,7 +155,8 @@ void commBrowser(int index) {
 			if (containsSubstr(url, ".jpg")) {
 				//sendPicture(url);
 				memset(fileName, 0, 200);
-				strcpy(fileName,eraseSubstr(url));
+				strcpy(fileName, filePath);
+				strcat(fileName,eraseSubstr(url));
 				FILE *fp = fopen(fileName, "r");
 				fseek(fp, 0, SEEK_END);
 				int img_size = ftell(fp);
@@ -169,7 +172,7 @@ void commBrowser(int index) {
 				memcpy(buf + length, imgbuf, img_size);
 				length += img_size;
 
-				int sent1 = send(clientSocket[index], buf, length, 0);
+				int sent1 = send(clientSocket, buf, length, 0);
 				if (sent1 == SOCKET_ERROR)
 					printf("content sending error\n");
 				else
@@ -197,7 +200,8 @@ void commBrowser(int index) {
 
 				//send html
 				if (strlen(url) == 1) {
-					strcpy(fileName, "echoIndex.htm");
+					strcpy(fileName, filePath);
+					strcat(fileName, "echoIndex.htm");
 				}
 				printf("request file name: %s\n\n", fileName);
 
@@ -213,7 +217,7 @@ void commBrowser(int index) {
 				strcat(sendBuff, fileBuff);
 				//strcat(sendBuff, "<html><body>hello!</body></html>");
 				//printf("%s\n", sendBuff);
-				int sent = send(clientSocket[index], sendBuff, strlen(sendBuff), NULL);
+				int sent = send(clientSocket, sendBuff, strlen(sendBuff), NULL);
 				if (sent == SOCKET_ERROR)
 					printf("content sending error\n");
 				else
@@ -223,84 +227,133 @@ void commBrowser(int index) {
 	}
 }
 
+void keyboardCheck() {
+	int ch, ch1;
+	while (1) {
+		Sleep(1000);
+		if (_kbhit()) {
+			ch = _getch();
+			ch1 = _getch();
+			if (ch == 27)
+				echoFlag = 0;
+		}
+	}
+}
+
 int main() {
 
-	//1. request protocol version
-	WSADATA wsaData;
-	WSAStartup(MAKEWORD(2, 2), &wsaData);	//Start up
-	if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
-		printf("request protocol version failure\n");
-		return -1;			//clean up winsock, report
-	}
-	printf("request protocol success!\n");
+	std::thread t1(keyboardCheck);
+	t1.detach();
 
-	//2. initiate socket
-	SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (serverSocket == SOCKET_ERROR) {
-		printf("initiate socket failure\n");
-		WSACleanup();
-		return -2;
-	}
-	printf("initiate socket success!\n");
-
-	//3. initiate protocol addr family
-	sockaddr_in addr = { 0 };
-	addr.sin_family = AF_INET;
-	//manully set server ip and port
-	char mip[16];
-	int mport;
-	cout << "input server ip to assign:(input 0 to assign local ip)" << endl;
-	cin >> mip;
-	cout << "input port you want to assign: ( range : 8888 - 18888 )" << endl;
-	cin >> mport;
-	if (!strcmp(mip,"0"))
-		addr.sin_addr.S_un.S_addr = htonl(INADDR_ANY);
-	else
-		addr.sin_addr.S_un.S_addr = inet_addr(mip);
-	addr.sin_port = htons(mport);	//htons and htonl: Host(byte) TO Network(byte) short/long
-	if (!strcmp(mip,"0"))
-		cout << "server set ip:" << "localhost" << "  server port:" << mport << endl;
-	else
-		cout << "server set ip:" << mip << "  server port:" << mport << endl;
-
-	//4. bind
-	int b = bind(serverSocket, (sockaddr*)&addr, sizeof addr);
-	if (b == -1) {
-		printf("binding failure");
-		closesocket(serverSocket);
-		WSACleanup();
-		return -3;
-	}
-	printf("bind success!\n");
-
-	//5. listen
-	int l = listen(serverSocket, 10);
-	if (l == -1) {
-		printf("listening failure");
-		closesocket(serverSocket);
-		WSACleanup();
-		return -4;
-	}
-	printf("listen success!\n");
-
-	//6. wait for client connection (×èÈû)
-	//get and save client addr family
+	int echoFlag1;
 	while (1) {
-		clientSocket[scount] = accept(serverSocket, (sockaddr*)&cAddr, &len);
-		if (clientSocket[scount] == SOCKET_ERROR) {
-			printf("server failed");
-			//8. close socket
-			closesocket(serverSocket);
-			//9. clean up protocol
-			WSACleanup();
-			return -5;
+
+		echoFlag = 1;
+		echoFlag1 = 1;
+
+		//1. request protocol version
+		WSADATA wsaData;
+		WSAStartup(MAKEWORD(2, 2), &wsaData);	//Start up
+		if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
+			printf("request protocol version failure\n");
+			return -1;			//clean up winsock, report
 		}
-		printf("\na client has connected to server !\n");
-		printf("\nclient %d : IP addr : %s Port : %hu\n\n", scount, inet_ntoa(cAddr.sin_addr), cAddr.sin_port);
-		//commBrowser(scount);
-		int i = scount;
-		CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)commBrowser, (LPVOID)i, NULL, NULL);
-		scount++;
+		printf("request protocol success!\n");
+
+		//2. initiate socket
+		SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (serverSocket == SOCKET_ERROR) {
+			printf("initiate socket failure\n");
+			WSACleanup();
+			return -2;
+		}
+		printf("initiate socket success!\n");
+
+		//3. initiate protocol addr family
+		sockaddr_in addr = { 0 };
+		addr.sin_family = AF_INET;
+		//manully set server ip and port
+		char mip[16];
+		int mport;
+		cout << "input server ip to assign:(input 0 to assign local ip)" << endl;
+		cin >> mip;
+		cout << "input port you want to assign: ( range : 8888 - 18888 )" << endl;
+		cin >> mport;
+		if (!strcmp(mip, "0"))
+			addr.sin_addr.S_un.S_addr = htonl(INADDR_ANY);
+		else
+			addr.sin_addr.S_un.S_addr = inet_addr(mip);
+		addr.sin_port = htons(mport);	//htons and htonl: Host(byte) TO Network(byte) short/long
+		if (!strcmp(mip, "0"))
+			cout << "server set ip:" << "localhost" << "  server port:" << mport << endl;
+		else
+			cout << "server set ip:" << mip << "  server port:" << mport << endl;
+
+		int ipath = 0;
+		do {
+			cout << "input main file path:" << endl;
+			cin >> filePath;
+			if (!strcmp(filePath, "0")) strcpy(filePath, getcwd(nullptr, 0));
+			cout << "server main file path:" << filePath << endl;
+			cout << "is this path legal?(1 for yes, and 0 for no)" << endl;
+			cin >> ipath;
+		} while (ipath == 0);
+		strcat(filePath, "/");
+
+		//4. bind
+		::bind(serverSocket, (sockaddr*)&addr, sizeof addr);
+		/*
+		if (b == -1) {
+			printf("binding failure");
+			closesocket(serverSocket);
+			WSACleanup();
+			return -3;
+		}
+		*/
+		printf("bind success!\n");
+
+		//5. listen
+		int l = listen(serverSocket, 10);
+		if (l == -1) {
+			printf("listening failure");
+			system("pause");
+			closesocket(serverSocket);
+			WSACleanup();
+			return -4;
+		}
+		printf("listen success!\n");
+
+		//6. wait for client connection (×èÈû)
+		//get and save client addr family
+		while (1) {
+			if (echoFlag == 0) {
+				break;
+			}
+			clientSocket = accept(serverSocket, (sockaddr*)&cAddr, &len);
+			if (echoFlag == 0) {
+				break;
+			}
+			if (clientSocket == SOCKET_ERROR) {
+				printf("socket failed");
+				//8. close socket
+				closesocket(serverSocket);
+				//9. clean up protocol
+				WSACleanup();
+				return -5;
+			}
+			printf("\na client has connected to server !\n");
+			printf("\nclient %d : IP addr : %s Port : %hu\n\n", scount, inet_ntoa(cAddr.sin_addr), cAddr.sin_port);
+			//commBrowser(scount);
+			CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)commBrowser, (LPVOID)clientSocket, NULL, NULL);
+
+		}
+
+		//8. close socket
+		closesocket(serverSocket);
+		printf("server socket closed\n");
+		//9. clean up protocol
+		WSACleanup();
+		printf("server socket cleaned up\n");
 	}
 	return 0;
 }
